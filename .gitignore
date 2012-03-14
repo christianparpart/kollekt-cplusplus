@@ -1,0 +1,9 @@
+.*.swp
+*.o
+src/kollektd
+CMakeCache.txt
+CMakeFiles
+Makefile
+cmake_install.cmake
+config.h
+src/libsd-daemon.a
