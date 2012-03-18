@@ -7,4 +7,9 @@ set(SD_LIBRARIES sd-daemon)
 # kollektd
 add_executable(kollektd main.cpp)
 set_target_properties(kollektd PROPERTIES COMPILE_FLAGS "-std=c++0x")
-target_link_libraries(kollektd ${SD_LIBRARIES} ${EV_LIBRARIES})
+target_link_libraries(kollektd ${SD_LIBRARIES} ${EV_LIBRARIES} pthread)
+
+# inkollektor
+add_executable(inkollektor inkollektor.cpp)
+set_target_properties(inkollektor PROPERTIES COMPILE_FLAGS "-std=c++0x")
+target_link_libraries(inkollektor pthread)

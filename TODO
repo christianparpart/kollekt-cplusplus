@@ -1,0 +1,19 @@
+----------------------------------------------------------------
+    T O D O
+----------------------------------------------------------------
+
+- systemd socket based activation support
+- process upgrade support (by serialize+execve+deserialization)
+
+----------------------------------------------------------------
+    D O N E
+----------------------------------------------------------------
+
+- make use of splice() syscall for maximum performance
+- instead of strlen inside the calees do pass the precomputed len by the caller
+- rewrite Writer code to run in a seperate (select()/poll()-based or non-polling) thread,
+  because epoll() does not seem to support local file system events :(
+- write *proper* CSV header
+- wrote a C-based producer for performance testing
+- hook into system signal (USR1) to log bucket stats
+- graceful exit via SIGTERM and SIGINT (C-c)

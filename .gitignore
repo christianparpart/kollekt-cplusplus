@@ -1,6 +1,8 @@
 .*.swp
 *.o
+*.csv
 src/kollektd
+src/inkollektor
 CMakeCache.txt
 CMakeFiles
 Makefile
