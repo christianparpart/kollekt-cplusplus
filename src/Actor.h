@@ -21,10 +21,14 @@ public:
 	explicit Actor(size_t scalability = 1);
 	virtual ~Actor();
 
+	bool empty() const;
+	size_t size() const;
 	int scalability() const { return threads_.size(); }
 
-	void send(Message message);
-	void push_back(Message message) { send(message); }
+	void send(const Message& message);
+
+	void push_back(const Message& message) { send(message); }
+	Actor<Message>& operator<<(const Message& message) { send(message); return *this; }
 
 	void start();
 	void stop();
@@ -59,7 +63,22 @@ inline Actor<Message>::~Actor()
 }
 
 template<typename Message>
-inline void Actor<Message>::send(Message message)
+bool Actor<Message>::empty() const
+{
+	return size() == 0;
+}
+
+template<typename Message>
+size_t Actor<Message>::size() const
+{
+	pthread_mutex_lock(&lock_);
+	size_t result = messages_.size();
+	pthread_mutex_unlock(&lock_);
+	return result;
+}
+
+template<typename Message>
+inline void Actor<Message>::send(const Message& message)
 {
 	pthread_mutex_lock(&lock_);
 	messages_.push_back(message);
@@ -93,11 +112,10 @@ inline void Actor<Message>::join()
 }
 
 template<typename Message>
-void* Actor<Message>::_main(void* selfp)
+void* Actor<Message>::_main(void* self)
 {
-	Actor<Message>* self = reinterpret_cast<Actor<Message>*>(selfp);
-	self->main();
-	return self;
+	reinterpret_cast<Actor<Message>*>(self)->main();
+	return nullptr;
 }
 
 template<typename Message>
