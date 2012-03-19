@@ -1,4 +1,5 @@
 #include "PerformanceCounter.h"
+#include "Actor.h"
 #include <iostream>
 #include <unordered_map>
 #include <atomic>
@@ -21,8 +22,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <ev++.h>
-
-#include <pthread.h>
 
 #if 0
 #	define DEBUG(msg...) std::fprintf(stderr, msg)
@@ -61,7 +60,7 @@ private:
 	void timeoutIdle(ev::timer&, int);
 }; // }}}
 
-class Writer // {{{
+class Writer : public x0::Actor<Bucket*> // {{{
 {
 private:
 	ev::loop_ref loop_;
@@ -69,29 +68,16 @@ private:
 	int currentChunkId_; // the current (e.g.) hour. re-open the output file once this unit differs to the current (e.g.) hour
 	size_t outputOffset_;
 	int fd_; // handle to the current open output file
-	std::deque<Bucket*> buckets_;
-	pthread_t thread_;
-	bool shutdown_;
-
-	pthread_mutex_t bucketsLock_;
-	pthread_mutex_t waitLock_;
-	pthread_cond_t condition_;
 
 public:
 	explicit Writer(ev::loop_ref loop);
 	~Writer();
 
 	void setStoragePath(const std::string& path) { storagePath_ = path; }
-	void start();
-	void stop();
-	void join();
-	void push_back(Bucket* bucket);
 
-private:
-	static void* _run(void* self);
-	void main();
+protected:
+	virtual void process(Bucket* bucket);
 	bool checkOutput();
-	void writeBuckets();
 }; // }}}
 
 class Server // {{{
@@ -248,71 +234,12 @@ Writer::Writer(ev::loop_ref loop) :
 	storagePath_("."),
 	currentChunkId_(0),
 	outputOffset_(1),
-	fd_(-1),
-	buckets_(),
-	thread_(),
-	shutdown_(false),
-	bucketsLock_(),
-	waitLock_(),
-	condition_()
+	fd_(-1)
 {
-	pthread_mutex_init(&bucketsLock_, nullptr);
-	pthread_mutex_init(&waitLock_, nullptr);
-	pthread_cond_init(&condition_, nullptr);
 }
 
 Writer::~Writer()
 {
-	pthread_cond_destroy(&condition_);
-	pthread_mutex_destroy(&waitLock_);
-	pthread_mutex_destroy(&bucketsLock_);
-}
-
-void Writer::start()
-{
-	pthread_create(&thread_, NULL, &Writer::_run, this);
-}
-
-void Writer::stop()
-{
-	shutdown_ = true;
-	pthread_cond_signal(&condition_);
-}
-
-void Writer::join()
-{
-	void* result = nullptr;
-	pthread_join(thread_, &result);
-}
-
-void* Writer::_run(void* p)
-{
-	reinterpret_cast<Writer*>(p)->main();
-	return NULL;
-}
-
-void Writer::push_back(Bucket* bucket)
-{
-	DEBUG("Writer.push_back(): %s\n", bucket->id().c_str());
-	pthread_mutex_lock(&waitLock_);
-	buckets_.push_back(bucket);
-	pthread_mutex_unlock(&waitLock_);
-
-	pthread_cond_signal(&condition_);
-}
-
-void Writer::main()
-{
-	pthread_mutex_lock(&waitLock_);
-
-	while (!shutdown_) {
-		pthread_cond_wait(&condition_, &waitLock_);
-
-		if (checkOutput())
-			writeBuckets();
-	}
-
-	pthread_mutex_unlock(&waitLock_);
 }
 
 bool Writer::checkOutput()
@@ -351,39 +278,34 @@ bool Writer::checkOutput()
 	return true;
 }
 
-void Writer::writeBuckets()
+void Writer::process(Bucket* bucket)
 {
-	DEBUG("Writer.writeBuckets()\n");
-
-	while (!buckets_.empty()) {
-		Bucket* bucket = buckets_.front();
-		ssize_t rv = splice(
-			bucket->stream_[0], NULL,
-			fd_, NULL,
-			bucket->streamSize_,
-			SPLICE_F_MOVE | SPLICE_F_MORE
-		);
-		switch (rv) {
-		case -1:
-			perror("splice");
-		case 0:
-			std::fprintf(stderr, "splice() failed.\n");
-			buckets_.pop_front();
-			delete bucket;
-			return;
+	if (checkOutput()) {
+		while (bucket->streamSize_ > 0) {
+			DEBUG(" splice(%d, nil, %d, nil, %ld, move|more)\n",
+					bucket->stream_[0], fd_, bucket->streamSize_);
+			ssize_t rv = splice(
+				bucket->stream_[0], NULL,
+				fd_, NULL,
+				bucket->streamSize_,
+				SPLICE_F_MOVE | SPLICE_F_MORE
+			);
+			switch (rv) {
+			case -1:
+				perror("splice");
+			case 0:
+				std::fprintf(stderr, "splice() failed.\n");
+				bucket->streamSize_ = 0;
+				break;
+			default:
+				bucket->streamSize_ -= rv;
+				outputOffset_ += rv;
+				break;
+			}
 		}
-		bucket->streamSize_ -= rv;
-		outputOffset_ += rv;
-		DEBUG("- wrote bucket chunk of size %zi\n", rv);
 
-		if (bucket->streamSize_ == 0) { // bucket fully flushed.
-			DEBUG("- bucket fully flushed\n");
-			buckets_.pop_front();
-			delete bucket;
-		}
+		delete bucket;
 	}
-
-	DEBUG("Writer.writeBuckets: done\n");
 }
 // }}}
 
