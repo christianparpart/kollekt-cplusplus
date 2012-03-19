@@ -113,7 +113,10 @@ void Actor<Message>::main()
 
 		Message message = messages_.front();
 		messages_.pop_front();
+
+		pthread_mutex_unlock(&lock_);
 		process(message);
+		pthread_mutex_lock(&lock_);
 	}
 
 	pthread_mutex_unlock(&lock_);
