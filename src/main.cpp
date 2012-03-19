@@ -230,6 +230,7 @@ void Bucket::timeoutIdle(ev::timer&, int)
 
 // {{{ Writer impl
 Writer::Writer(ev::loop_ref loop) :
+	Actor(1),
 	loop_(loop),
 	storagePath_("."),
 	currentChunkId_(0),

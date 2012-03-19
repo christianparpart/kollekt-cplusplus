@@ -2,6 +2,7 @@
 #define sw_x0_Actor_h (1)
 
 #include <deque>
+#include <vector>
 #include <pthread.h>
 
 namespace x0 {
@@ -10,32 +11,41 @@ template<typename Message>
 class Actor
 {
 private:
-	std::deque<Message> messages_;
 	bool shutdown_;
-	pthread_t thread_;
+	std::deque<Message> messages_;
+	std::vector<pthread_t> threads_;
 	pthread_mutex_t lock_;
 	pthread_cond_t condition_;
 
 public:
-	Actor();
+	explicit Actor(size_t scalability = 1);
 	virtual ~Actor();
+
+	int scalability() const { return threads_.size(); }
 
 	void send(Message message);
 	void push_back(Message message) { send(message); }
-	virtual void process(Message message) = 0;
 
 	void start();
 	void stop();
 	void join();
 
-	void main();
+protected:
+	virtual void process(Message message) = 0;
+
 private:
+	void main();
 	static void* _main(void* self);
 };
 
 // {{{ impl
 template<typename Message>
-inline Actor<Message>::Actor()
+inline Actor<Message>::Actor(size_t scalability) :
+	shutdown_(false),
+	messages_(),
+	threads_(scalability),
+	lock_(),
+	condition_()
 {
 	pthread_mutex_init(&lock_, nullptr);
 	pthread_cond_init(&condition_, nullptr);
@@ -61,21 +71,25 @@ inline void Actor<Message>::send(Message message)
 template<typename Message>
 void Actor<Message>::start()
 {
-	pthread_create(&thread_, NULL, &Actor<Message>::_main, this);
+	shutdown_ = false;
+	for (auto& thread: threads_)
+		pthread_create(&thread, NULL, &Actor<Message>::_main, this);
 }
 
 template<typename Message>
 inline void Actor<Message>::stop()
 {
 	shutdown_ = true;
-	pthread_cond_signal(&condition_);
+	pthread_cond_broadcast(&condition_);
 }
 
 template<typename Message>
 inline void Actor<Message>::join()
 {
-	void* tmp = nullptr;
-	pthread_join(thread_, &tmp);
+	for (auto thread: threads_) {
+		void* tmp = nullptr;
+		pthread_join(thread, &tmp);
+	}
 }
 
 template<typename Message>
@@ -91,17 +105,17 @@ void Actor<Message>::main()
 {
 	pthread_mutex_lock(&lock_);
 
-	while (!shutdown_) {
+	for (;;) {
 		pthread_cond_wait(&condition_, &lock_);
 
-		while (!messages_.empty()) {
-			Message message = messages_.front();
-			messages_.pop_front();
-			process(message);
-		}
+		if (shutdown_)
+			break;
+
+		Message message = messages_.front();
+		messages_.pop_front();
+		process(message);
 	}
 
-	shutdown_ = false;
 	pthread_mutex_unlock(&lock_);
 }
 // }}}
