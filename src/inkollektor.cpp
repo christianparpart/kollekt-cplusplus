@@ -181,14 +181,16 @@ int main(int argc, char* argv[])
 					"%s [-c NUM] [-n NUM] | [-h]\n"
 					"\n"
 					"  -h, --help               print this help\n"
-					"  -c, --concurrency=NUM    number of concurrent threads [default=%d]\n"
-					"  -n, --message-count=NUM  number of messages to sent per thread [default=%lld]\n"
+					"  -a, --address=IP         sets the target host IP address [%s]\n"
+					"  -p, --port=NUM           sets the target UDP port number [%d]\n"
+					"  -c, --concurrency=NUM    number of concurrent threads [%d]\n"
+					"  -n, --message-count=NUM  number of messages to sent per thread [%lld]\n"
 					"                           (a value of -1 means unlimited)\n"
 					"\n"
 					"  This tool produces kollektor compatible message streams to performance-test\n"
 					"  the kollektor implementation.\n"
 					"\n",
-					argv[0], concurrency, message_count);
+					argv[0], address.c_str(), port, concurrency, message_count);
 				return 0;
 			case 'p':
 				port = std::atoi(optarg);
