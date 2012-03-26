@@ -4,6 +4,9 @@
 #include <deque>
 #include <vector>
 #include <pthread.h>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 
 namespace x0 {
 
@@ -14,8 +17,8 @@ private:
 	bool shutdown_;
 	std::deque<Message> messages_;
 	std::vector<pthread_t> threads_;
-	pthread_mutex_t lock_;
-	pthread_cond_t condition_;
+	std::unique_lock<std::mutex> lock_;
+	std::condition_variable cond_;
 
 public:
 	explicit Actor(size_t scalability = 1);
@@ -49,17 +52,13 @@ inline Actor<Message>::Actor(size_t scalability) :
 	messages_(),
 	threads_(scalability),
 	lock_(),
-	condition_()
+	cond_()
 {
-	pthread_mutex_init(&lock_, nullptr);
-	pthread_cond_init(&condition_, nullptr);
 }
 
 template<typename Message>
 inline Actor<Message>::~Actor()
 {
-	pthread_cond_destroy(&condition_);
-	pthread_mutex_destroy(&lock_);
 }
 
 template<typename Message>
@@ -71,20 +70,17 @@ bool Actor<Message>::empty() const
 template<typename Message>
 size_t Actor<Message>::size() const
 {
-	pthread_mutex_lock(&lock_);
+	std::lock_guard<decltype(lock_)> l(lock_);
 	size_t result = messages_.size();
-	pthread_mutex_unlock(&lock_);
 	return result;
 }
 
 template<typename Message>
 inline void Actor<Message>::send(const Message& message)
 {
-	pthread_mutex_lock(&lock_);
+	std::lock_guard<decltype(lock_)> l(lock_);
 	messages_.push_back(message);
-	pthread_mutex_unlock(&lock_);
-
-	pthread_cond_signal(&condition_);
+	cond_.notify_one();
 }
 
 template<typename Message>
@@ -99,7 +95,7 @@ template<typename Message>
 inline void Actor<Message>::stop()
 {
 	shutdown_ = true;
-	pthread_cond_broadcast(&condition_);
+	cond_.notify_all();
 }
 
 template<typename Message>
@@ -121,10 +117,10 @@ void* Actor<Message>::_main(void* self)
 template<typename Message>
 void Actor<Message>::main()
 {
-	pthread_mutex_lock(&lock_);
+	std::lock_guard<decltype(lock_)> l(lock_);
 
 	for (;;) {
-		pthread_cond_wait(&condition_, &lock_);
+		cond_.wait(lock_);
 
 		if (shutdown_)
 			break;
@@ -132,12 +128,15 @@ void Actor<Message>::main()
 		Message message = messages_.front();
 		messages_.pop_front();
 
-		pthread_mutex_unlock(&lock_);
-		process(message);
-		pthread_mutex_lock(&lock_);
+		lock_.unlock();
+		try {
+			process(message);
+		} catch (...) {
+			lock_.lock();
+			throw;
+		}
+		lock_.lock();
 	}
-
-	pthread_mutex_unlock(&lock_);
 }
 // }}}
 
