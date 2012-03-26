@@ -5,8 +5,11 @@
 #include <vector>
 #include <pthread.h>
 #include <thread>
+#include <future>
 #include <mutex>
 #include <condition_variable>
+#include <memory>
+#include <functional>
 
 namespace x0 {
 
@@ -16,7 +19,8 @@ class Actor
 private:
 	bool shutdown_;
 	std::deque<Message> messages_;
-	std::vector<pthread_t> threads_;
+	std::vector<std::future<void>> threads_;
+	std::mutex mutex_;
 	std::unique_lock<std::mutex> lock_;
 	std::condition_variable cond_;
 
@@ -42,7 +46,6 @@ protected:
 
 private:
 	void main();
-	static void* _main(void* self);
 };
 
 // {{{ impl
@@ -51,7 +54,8 @@ inline Actor<Message>::Actor(size_t scalability) :
 	shutdown_(false),
 	messages_(),
 	threads_(scalability),
-	lock_(),
+	mutex_(),
+	lock_(mutex_),
 	cond_()
 {
 }
@@ -70,7 +74,7 @@ bool Actor<Message>::empty() const
 template<typename Message>
 size_t Actor<Message>::size() const
 {
-	std::lock_guard<decltype(lock_)> l(lock_);
+	std::lock_guard<decltype(mutex_)> l(mutex_);
 	size_t result = messages_.size();
 	return result;
 }
@@ -78,7 +82,7 @@ size_t Actor<Message>::size() const
 template<typename Message>
 inline void Actor<Message>::send(const Message& message)
 {
-	std::lock_guard<decltype(lock_)> l(lock_);
+	std::lock_guard<decltype(mutex_)> l(mutex_);
 	messages_.push_back(message);
 	cond_.notify_one();
 }
@@ -87,8 +91,10 @@ template<typename Message>
 void Actor<Message>::start()
 {
 	shutdown_ = false;
-	for (auto& thread: threads_)
-		pthread_create(&thread, NULL, &Actor<Message>::_main, this);
+
+	for (auto& thread: threads_) {
+		thread = std::move(std::async(std::bind(&Actor<Message>::main, this)));
+	}
 }
 
 template<typename Message>
@@ -101,23 +107,15 @@ inline void Actor<Message>::stop()
 template<typename Message>
 inline void Actor<Message>::join()
 {
-	for (auto thread: threads_) {
-		void* tmp = nullptr;
-		pthread_join(thread, &tmp);
+	for (auto& thread: threads_) {
+		thread.wait();
 	}
-}
-
-template<typename Message>
-void* Actor<Message>::_main(void* self)
-{
-	reinterpret_cast<Actor<Message>*>(self)->main();
-	return nullptr;
 }
 
 template<typename Message>
 void Actor<Message>::main()
 {
-	std::lock_guard<decltype(lock_)> l(lock_);
+	std::lock_guard<decltype(mutex_)> l(mutex_);
 
 	for (;;) {
 		cond_.wait(lock_);
@@ -128,14 +126,14 @@ void Actor<Message>::main()
 		Message message = messages_.front();
 		messages_.pop_front();
 
-		lock_.unlock();
-		try {
 			process(message);
+		/*lock_.unlock();
+		try {
 		} catch (...) {
 			lock_.lock();
 			throw;
 		}
-		lock_.lock();
+		lock_.lock();*/
 	}
 }
 // }}}
