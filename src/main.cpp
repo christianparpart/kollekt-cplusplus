@@ -73,6 +73,7 @@ public:
 	explicit Writer(ev::loop_ref loop);
 	~Writer();
 
+	const std::string storagePath() const { return storagePath_; }
 	void setStoragePath(const std::string& path) { storagePath_ = path; }
 
 protected:
@@ -83,6 +84,9 @@ protected:
 class Server // {{{
 {
 private:
+	std::string address_;
+	int port_;
+
 	ev::loop_ref loop_;
 	int fd_;
 	ev::io io_;
@@ -232,7 +236,7 @@ void Bucket::timeoutIdle(ev::timer&, int)
 Writer::Writer(ev::loop_ref loop) :
 	Actor(1),
 	loop_(loop),
-	storagePath_("."),
+	storagePath_("/var/tmp"),
 	currentChunkId_(0),
 	outputOffset_(1),
 	fd_(-1)
@@ -312,6 +316,8 @@ void Writer::process(Bucket* bucket)
 
 // {{{ Server impl
 Server::Server(ev::loop_ref loop) :
+	address_("0.0.0.0"),
+	port_(2323),
 	loop_(loop),
 	io_(loop),
 	usr1Signal_(loop),
@@ -369,9 +375,6 @@ Server::~Server()
 
 bool Server::setup(int argc, char* argv[])
 {
-	int port = 2323;
-	char address[64] = "0.0.0.0";
-
 	static const struct option long_options[] = {
 		{ "help", no_argument, NULL, 'h' },
 		{ "port", required_argument, NULL, 'p' },
@@ -392,10 +395,10 @@ bool Server::setup(int argc, char* argv[])
 				printHelp(argv[0]);
 				return false;
 			case 'p':
-				port = std::atoi(optarg);
+				port_ = std::atoi(optarg);
 				break;
 			case 'a':
-				strncpy(address, optarg, sizeof(address));
+				address_ = optarg;
 				break;
 			case 's':
 				writer_.setStoragePath(optarg);
@@ -417,7 +420,7 @@ bool Server::setup(int argc, char* argv[])
 				break;
 			case -1:
 				// EOF - everything parsed
-				return start(port, address);
+				return start(port_, address_.c_str());
 				break;
 			default:
 				return false;
@@ -592,15 +595,18 @@ void Server::printHelp(const char* program)
 	printf("usage: %s [-a ADDRESS] [-p PORT] [-s STORAGE_PATH] [resource options] | -h\n"
 		   "\n"
 		   "  -h, -?, --help               print this help\n"
-		   "  -a, --address=ADDR           binds to this UDP address for listening\n"
-		   "  -p, --port=PORT              sets the UDP listen port\n"
-		   "  -s, --storage-path=PATH      set the logging output directory\n"
-		   "  -c, --max-bucket-count=VALUE sets the limit of concurrently managed buckets\n"
-		   "  -n, --max-bucket-size=VALUE  sets the limit of items per bucket\n"
-		   "  -i, --max-bucket-idle=VALUE  sets the maximum bucket idle time in seconds\n"
-		   "  -t, --max-bucket-ttl=VALUE   sets the bucket TTL (time to life) in seconds\n"
+		   "  -a, --address=ADDR           binds to this UDP address for listening [%s]\n"
+		   "  -p, --port=PORT              sets the UDP listen port [%d]\n"
+		   "  -s, --storage-path=PATH      set the logging output directory [%s]\n"
+		   "  -c, --max-bucket-count=VALUE sets the limit of concurrently managed buckets [%zu]\n"
+		   "  -n, --max-bucket-size=VALUE  sets the limit of items per bucket [%zu]\n"
+		   "  -i, --max-bucket-idle=VALUE  sets the maximum bucket idle time in seconds [%zu]\n"
+		   "  -t, --max-bucket-ttl=VALUE   sets the bucket TTL (time to life) in seconds [%zu]\n"
 		   "\n",
-		   program);
+		   program,
+		   address_.c_str(), port_, writer_.storagePath().c_str(),
+		   maxBucketCount_, maxBucketSize_, maxBucketIdle_, maxBucketTTL_
+	);
 }
 // }}}
 
